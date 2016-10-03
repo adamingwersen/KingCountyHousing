@@ -40,7 +40,7 @@ dailyBot.dt <- bot10.dt %>%
             count = n())
 
 
-# pal <- RColorBrewer::brewer.pal(nlevels(dailyBot.dt$count), "Set1")
+pal <- RColorBrewer::brewer.pal(nlevels(dailyBot.dt$count), "Set1")
 plot_ly(data = dailyTop.dt, x = date, y = dayPrice, 
         mode = "markers", size = count, opacity = 0.8, name = "Top 10%") %>%
   add_trace(data = dailyBot.dt, x = date, y = dayPrice, 
@@ -48,6 +48,10 @@ plot_ly(data = dailyTop.dt, x = date, y = dayPrice,
   layout(title = "Daily Price Fluctuations in King County Housing Market",
            xaxis = list(title ="Date"),
            yaxis = list(title ="Price Deviation from Group Mean"))
+
+
+
+
 
 
 

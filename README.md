@@ -1,4 +1,4 @@
-<h2> [Kaggle Competition:](https://www.kaggle.com/harlfoxem/housesalesprediction) "House Sales in King County, USA" </h2>
+<h2> (Kaggle Competition:)[https://www.kaggle.com/harlfoxem/housesalesprediction] "House Sales in King County, USA" </h2>
 
 This is a work in progress. This is a project i'm working on quite sparsely. The project flow is as follows:
 

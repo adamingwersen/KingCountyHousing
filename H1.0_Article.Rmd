@@ -1,0 +1,215 @@
+---
+title: "<center>King County Housing Prices</center>"
+subtitle: "<center>Kaggle Exercise</center>"
+author: "<center> ADAMIL </center>"
+output: 
+  html_document:
+    css: clean-blog.css
+    highlight: zenburn
+---
+<h3><center>Introduction and Outline</center></h3>
+
+Herro prease
+
+This is an exercise. 
+Will construct various visualizations and attempt at constructing a model based on ML-techniques. 
+
+<hr>
+
+<h4><center>Packages</center></h4>
+```{r packages, message = F, results = "hide"}
+setwd("~/Documents/R_Scripts/Kaggle/HousingPrices/")
+pkgs <- c('data.table',
+          'ggplot2',
+          'ggthemes',
+          'plotly',
+          'stringr',
+          'tidyr',
+          'dplyr',
+          'reshape2',
+          'knitr',
+          'geosphere')
+lapply(pkgs, require, character.only = TRUE)
+```
+
+This part is under construction....
+
+<hr>
+
+<h4><center>Read and clean data</center></h4>
+```{r dataload, message = F, results = "hide"}
+dir <- '/media/adam/HDD/Data/Kaggle/Housesalesprediction/kc_house_data.csv'
+houses.dt <- fread(dir)
+
+houses.dt$date <- gsub('T\\d{6}', '', houses.dt$date,)
+houses.dt$date <- as.Date(houses.dt$date, '%Y%m%d')
+```
+
+<h3><center>Inpsection of price compososition </center></h3>
+
+It's likely, that there are some anamolies across price-groupings. It'd be useful to know if modelling the entire population will yield proper results - or multiple models have to be constructed for each e.g. major price-level. Let's have a look at the top 10% and bottom 10% prices, respectively. For a start, let's look at some of the more standard variables:
+
+<h4><center>Split data</center></h4>
+```{r TopBotSplit, message = F}
+top10.dt <- as.data.frame(head(houses.dt[order(houses.dt$price,decreasing=T),],.1*nrow(houses.dt))) # Note: decreasing = T
+bot10.dt <- as.data.frame(head(houses.dt[order(houses.dt$price,decreasing=F),],.1*nrow(houses.dt))) # Note: decreasing = F
+
+keepCols <- c('date', 'price', 'bedrooms', 'bathrooms', 'sqft_living', 'condition', 'grade', 'yr_built')
+top10.dt <- top10.dt[, which(names(top10.dt) %in% keepCols)]
+bot10.dt <- bot10.dt[, which(names(bot10.dt) %in% keepCols)]
+bot10.dt <- bot10.dt[order(bot10.dt$date),]
+top10.dt <- top10.dt[order(top10.dt$date),]
+
+kable(rbind(summary(top10.dt$price), summary(bot10.dt$price)))
+```
+
+When looking at data from between the two price-groups, the Top 10% appear to have larger fluctuations in price levels - however, one should pay attention to the fact, that Bottom 10% have a lower base. Therefore, a simple observation-deviation-from-category-mean variable is constructed using:
+
+$$
+dev_{i} = 1 - \frac{price_{i}-\mu}{\mu}
+$$
+
+Using this, and date-grouping - we can take a look into the price composition between the two outer-most buyer-segments:
+```{r mutateAndSummarise, message = F, results = 'hide'}
+top10.dt <- mutate(top10.dt, meanDevPrice = 1-(price - mean(price))/mean(price))
+bot10.dt <- mutate(bot10.dt, meanDevPrice = 1-(price - mean(price))/mean(price))
+
+dailyTop.dt <- top10.dt %>%
+  group_by(date) %>%
+  summarise(dayPriceDev = mean(meanDevPrice),
+            count = n(),
+            dayPrice = mean(price))
+
+dailyBot.dt <- bot10.dt %>%
+  group_by(date) %>%
+  summarise(dayPriceDev = mean(meanDevPrice),
+            count = n(),
+            dayPrice = mean(price))
+```
+
+We can visualize the deviation from mean over time of the two groupings using e.g. plotly:
+```{r plotlyViz1, message = F, fig.align = "center", fig.width = 9, fig.height = 6}
+plot_ly(data = dailyTop.dt, x = date, y = dayPriceDev, 
+        mode = "markers", size = count, opacity = 0.8, name = "Top 10%") %>%
+  add_trace(data = dailyBot.dt, x = date, y = dayPriceDev, 
+            mode = "markers", size = count, opacity = 0.8, name = "Bottom 10%") %>%
+  layout(title = "Daily Price Fluctuations in King County Housing Market",
+           xaxis = list(title ="Date"),
+           yaxis = list(title ="Price Deviation from Group Mean"))
+```
+
+<hr>
+It's quite clear, that even when considering the relative size of differences in prices - that the top 10% do range over (also relatively) more price sizes. This is an intuitive result as the is an actual floor on the price - but not an actual ceiling.
+
+Proceeding, one oddity in the data is the lack of differences in house-condition of the top and bottom. One would expect that a larger fraction of the houses in the top 10% would be renovated, better maintained or deliberately modern as compared to the bottom 10%. There's no affirmation of the expectation in the data:
+
+```{r cbindCond, message = F, fig.align = "center", fig.width = 9, fig.height = 6}
+kable(rbind(summary(top10.dt$condition), summary(bot10.dt$condition)))
+plot_ly(data = top10.dt, x = condition, type = 'histogram', opacity = 0.55, name = "Top 10%") %>%
+  add_trace(data = bot10.dt, x = condition, type = 'histogram', opacity = 0.55, name = "Bottom 10%") %>%
+  layout(barmode = 'overlay', title = "Condition of Housing in the top 10% and bottom 10%",
+           xaxis = list(title ="Condition"),
+           yaxis = list(title ="Number of homes traded"))
+```
+
+King County is a rather large area - with the Seattle area being the most expensive. At the moment, the long/lat coordinates provided in the data are not very useful for building a model. Let's create some new variables: Two distances from exclusive areas; Downtown Seattle and Bellevue - and from two lower-income areas; SeaTac and Enumclaw. 
+<br>
+Not being from King County, I relied on an [article](http://seattlebubble.com/blog/2012/06/21/the-seattle-areas-most-expensive-zip-code-is/) - and found a website, which was very useful for getting the exact [locations of the areas/cities](https://www.distancesto.com/coordinates/us/enumclaw-latitude-longitude/history/94679.html). For calculating the distances for each observation in the dataset, [the approach by Mark Needham](http://www.markhneedham.com/blog/2014/12/04/r-applying-a-function-to-every-row-of-a-data-frame/) was a tremendous help!
+<br>
+By running the lines of code below, 4 new variables are obtained, which meausures the meter-distance from the 4 coordinates stated. I was not particularly concerned with the marginal differences in accuray related to using 'distHaversine' as compared to another measure. 
+```{r distCalcs, message = F}
+seattle.coord <- c(-122.335167, 47.608013)
+bellevue.coord <- c(-122.2006786, 47.610377)
+seatac.coord <- c(-122.2960726 ,47.4435903)
+enumclaw.coord <- c(-121.9915, 47.204268)
+
+houses.dt <- houses.dt %>%
+  mutate(distSeattle = by(houses.dt, 1:nrow(houses.dt), function(row){distHaversine(c(row$long, row$lat), seattle.coord)})) %>%
+  mutate(distBellevue = by(houses.dt, 1:nrow(houses.dt), function(row){distHaversine(c(row$long, row$lat), bellevue.coord)})) %>%
+  mutate(distSeatac = by(houses.dt, 1:nrow(houses.dt), function(row){distHaversine(c(row$long, row$lat), seatac.coord)})) %>%
+  mutate(distEnumclaw = by(houses.dt, 1:nrow(houses.dt), function(row){distHaversine(c(row$long, row$lat), enumclaw.coord)}))
+```
+
+Now, it would be interesting to see, what the prices are, as a function of the distance to each of the coordinates.
+
+```{r distPlot, message = F, fig.align = "center", fig.width = 9, fig.height = 6}
+aggSeattle <- houses.dt %>%
+  group_by(floor(distSeattle/100)) %>%
+  summarise(count = n(),
+            price = mean(price),
+            sqft = mean(sqft_living),
+            condition = mean(condition),
+            grade = mean(grade),
+            price.sqft = mean(price/sqft_living))
+colnames(aggSeattle)[1] <- "distSeattle"
+
+aggSeatac <- houses.dt %>%
+  group_by(floor(distSeatac/100)) %>%
+  summarise(count = n(),
+            price = mean(price),
+            sqft = mean(sqft_living),
+            condition = mean(condition),
+            grade = mean(grade),
+            price.sqft = mean(price/sqft_living))
+colnames(aggSeatac)[1] <- "distSeatac"
+
+aggEnumclaw <- houses.dt %>%
+  group_by(floor(distEnumclaw/100)) %>%
+  summarise(count = n(),
+            price = mean(price),
+            sqft = mean(sqft_living),
+            condition = mean(condition),
+            grade = mean(grade),
+            price.sqft = mean(price/sqft_living))
+colnames(aggEnumclaw)[1] <- "distEnumclaw"
+
+aggBellevue <- houses.dt %>%
+  group_by(floor(distBellevue/100)) %>%
+  summarise(count = n(),
+            price = mean(price),
+            sqft = mean(sqft_living),
+            condition = mean(condition),
+            grade = mean(grade),
+            price.sqft = mean(price/sqft_living))
+colnames(aggBellevue)[1] <- "distBellevue"
+
+plot_ly(data = aggEnumclaw, x = distEnumclaw, y = price, mode = "markers", 
+        size = sqft, name = 'Distance from Enumclaw', opacity = 0.7) %>%
+  add_trace(data = aggSeattle, x = distSeattle, y = price, mode = "markers", 
+            size = sqft, name = 'Distance from Seattle', opacity = 0.7) %>%
+  add_trace(data = aggSeatac, x = distSeatac, y = price, mode = "markers", 
+            size = sqft, name = 'Distance from SeaTac', opacity = 0.7) %>%
+  add_trace(data = aggBellevue, x = distBellevue, y = price, mode = "markers", 
+            size = sqft, name = 'Distance from Bellevue', opacity = 0.7) %>%
+  layout(title = "Housing prices and distances from different citites",
+           xaxis = list(title ="Distance in 100's of meters "),
+           yaxis = list(title ="Price"))
+```
+
+It's clear to see that the houses with the highest price-tags, are the ones in the close vicinity of Bellevue and Seattle, whilst we see low sales prices in correlation with houses being located in particularly SeaTac. Be aware, that as the distance increases to the centrum of either Enumclaw, SeaTac, Bellevue or Seattle - we know less of the "radius" in which the house is located. 
+It may very well be, that the observed spike in house prices observed 65KM away from Enumclaw are exactly the houses that are being sold at premium prices in e.g. Seattle. 
+The same spike is being observed in houses approximately 22KM away from SeaTac, which is the exact distance from Seattle to SeaTac! 
+
+These observations incline one to believe that housing prices are highly correlated with the distance from Seattle - or the even more exclusive Bellevue area. 
+
+```{r PCA, message = FALSE}
+dropCols <- c('id', 'date', 'lat', 'long', 'zipcode')
+pcaHouses <- houses.dt[, -which(names(houses.dt) %in% dropCols)]
+asNumericCols <- c('distSeattle', 'distBellevue', 'distSeatac', 'distEnumclaw', 'floors')
+pcaHouses[, asNumericCols] = apply(pcaHouses[, asNumericCols], 2, function(x) as.numeric(x))
+
+pcaHouses <- princomp(pcaHouses, cor = TRUE)
+names(pcaHouses)
+summary(pcaHouses)
+plot(pcaHouses, type = 'l')
+hClusterHouses <- hclust(dist(pcaHouses$scores), method = "ward.D2")
+houseClusters <- cutree(hClusterHouses, k = 3)
+clusterHouses <- data.frame(pcaHouses$scores, 'cluster' = factor(houseClusters))
+clusterHouses <- transform(clusterHouses, cluster_name = paste("Cluster", houseClusters))
+
+plot_ly(clusterHouses, x = Comp.1, y = Comp.2, text = rownames(clusterHouses),
+        mode = 'markers', color = cluster_name, marker = list(size = 11), opacity = 0.7) %>%
+  layout(title = 'PCA Clusters from HC on King County House Data',
+         xaxis = list(title = '1st Principal Component'),
+         yaxis = list(title = '2nd Principal Component'))
+```

@@ -1,6 +1,6 @@
 # Install all used packages
 
-pkgs <- c('dplyr', 'rvest', 'httr', 'rjsonio', 'caret', 'data.table', 
+pkgs <- c('dplyr', 'rvest', 'httr', 'RJSONIO', 'caret', 'data.table', 
           'ggplot2', 'ggthemes', 'plotly', 'mapsDK',
           'tidyr', 'stringr', 'jsonlite', 'knitr', 'rmarkdown', 'reshape2',
           'ggmap', 'devtools', 'RCurl', 'Rcpp', 'lubridate',

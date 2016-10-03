@@ -5,59 +5,54 @@ pkgs <- c('data.table',
           'stringr',
           'tidyr',
           'dplyr',
-          'choroplethr',
-          'choroplethrMaps',
-          'ggmaps')
+          'reshape2')
 lapply(pkgs, require, character.only = TRUE)
 
-dir <- '~/Documents/Data/Kaggle/Housesalesprediction/kc_house_data.csv'
+dir <- '/media/adam/HDD/Data/Kaggle/Housesalesprediction/kc_house_data.csv'
 houses.dt <- fread(dir)
-
-## Initial Inspection
-
-houses.dt$grade <- as.factor(houses.dt$grade)
-houses.dt$condition <- as.factor(houses.dt$condition)
-p = ggplot(data = houses.dt, aes(x = sqft_living, y = price))
-p = p + geom_point(colour = grade) + theme_economist() + labs(title = 'Price ~ Size', x= 'Square-footage', y = 'Sell Price')
-p = p + scale_color_economist() + theme(plot.title=element_text(hjust=0.5))
-plot(p)
-
-lm <- lm(price ~ sqft_basement, data = houses.dt)
-plot(lm)
-lm
-
 
 ## Data cleaning
 
 houses.dt$date <- gsub('T\\d{6}', '', houses.dt$date,)
 houses.dt$date <- as.Date(houses.dt$date, "%Y%m%d")
 
-p = ggplot(data = houses.dt, aes(x = date, y = price, group = condition, colour = condition))
-p = p + geom_point(aes(alpha = 0.1)) + theme_economist() + scale_color_fivethirtyeight()
-p = p  + theme(plot.title=element_text(hjust=0.5)) + labs(title = 'Price ~ Size', x= 'Date', y = 'Sell Price')
-plot(p)
+top10.dt <- as.data.frame(head(houses.dt[order(houses.dt$price,decreasing=T),],.1*nrow(houses.dt)))
+bot10.dt <- as.data.frame(head(houses.dt[order(houses.dt$price,decreasing=F),],.1*nrow(houses.dt)))
 
-summary(houses.dt$condition)
+keepCols <- c("date", "price", "bedrooms", "bathrooms", "sqft_living", "condition", "grade", "yr_built")
+top10.dt <- top10.dt[, which(names(top10.dt) %in% keepCols)]
+bot10.dt <- bot10.dt[, which(names(bot10.dt) %in% keepCols)]
+bot10.dt <- bot10.dt[order(bot10.dt$date),]
+top10.dt <- top10.dt[order(top10.dt$date),]
 
-is.data.table(houses.dt)
-houses.dt[, lapply(.SD, sum), by = date]
 
-ibrary(dplyr)
+top10.dt <- mutate(top10.dt, meanDevPrice = 1-(price - mean(price))/mean(price))
+bot10.dt <- mutate(bot10.dt, meanDevPrice = 1-(price - mean(price))/mean(price))
 
-sumhouses.dt <- houses.dt %>%
-  group_by(date && grade) %>%
-  summarise(avg.price = mean(price))
+dailyTop.dt <- top10.dt %>%
+  group_by(date) %>%
+  summarise(dayPrice = mean(meanDevPrice),
+            count = n())
 
-g = ggplot(data = sumhouses.dt, aes(x = date, y = avg.price))
-g = g + geom_line() + theme_fivethirtyeight() + scale_color_tableau()
-g = g + theme(plot.title=element_text(hjust=0.5)) + labs(title = 'Average Sales Prices', x = 'Date', y = 'Avg. Daily Sell Price')
-plot(g)
+dailyBot.dt <- bot10.dt %>%
+  group_by(date) %>%
+  summarise(dayPrice = mean(meanDevPrice),
+            count = n())
 
-counties <- map_data('county')
-washington <- subset(counties, region == "washington")
-king <- subset(washington, subregion == "kings")
-kingsCounty <- merge(washington, houses.dt, by=c("lat","long"))
-washington <- subset(states, region %in% c("california", "oregon", "washington"))
+
+# pal <- RColorBrewer::brewer.pal(nlevels(dailyBot.dt$count), "Set1")
+plot_ly(data = dailyTop.dt, x = date, y = dayPrice, 
+        mode = "markers", size = count, opacity = 0.8, name = "Top 10%") %>%
+  add_trace(data = dailyBot.dt, x = date, y = dayPrice, 
+            mode = "markers", size = count, opacity = 0.8, name = "Bottom 10%") %>%
+  layout(title = "Daily Price Fluctuations in King County Housing Market",
+           xaxis = list(title ="Date"),
+           yaxis = list(title ="Price Deviation from Group Mean"))
+
+
+
+
+
 
 
 
